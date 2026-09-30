@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pynxt2or"
-version = "0.3.0"
-description = "Modern 64-bit LEGO NXT connector for Open Roberta Lab"
+version = "0.4.1"
+description = "Modern 64-bit LEGO NXT/EV3 connector for Open Roberta Lab"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -18,4 +18,7 @@ dependencies = [
 pynxt2or = "pynxt2or.__main__:main"
 
 [tool.setuptools]
-packages = ["pynxt2or"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
