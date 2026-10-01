@@ -60,6 +60,15 @@ class Window(QMainWindow):
         self.status.setWordWrap(True)
         box.addWidget(self.status)
 
+        self.token_label = QLabel("")
+        self.token_label.setAlignment(Qt.AlignCenter)
+        self.token_label.setTextFormat(Qt.RichText)
+        self.token_label.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
+        self.token_label.setOpenExternalLinks(False)
+        self.token_label.linkActivated.connect(self.copy_token)
+        self.token_label.hide()
+        box.addWidget(self.token_label)
+
         sl = QLabel("Open-Roberta-Server")
         sf = QFont(); sf.setBold(True); sl.setFont(sf)
         box.addWidget(sl)
@@ -134,6 +143,25 @@ class Window(QMainWindow):
         if self.connector_enabled and self.connector is not None:
             self.restart_connector()
 
+    @Slot(str)
+    def copy_token(self, _link=""):
+        if not self.connector or not self.connector.token:
+            return
+        QApplication.clipboard().setText(self.connector.token)
+        self.status.setText("Token in die Zwischenablage kopiert")
+
+    def update_token_label(self):
+        token = self.connector.token if self.connector else ""
+        if token:
+            self.token_label.setText(
+                f'<a href="copy"><b>Token: {token}</b></a>'
+                ' &nbsp; <span style="color:#777;">(anklicken zum Kopieren)</span>'
+            )
+            self.token_label.show()
+        else:
+            self.token_label.clear()
+            self.token_label.hide()
+
     def robot_system(self):
         if self.system_override:
             return self.system_override
@@ -174,6 +202,8 @@ class Window(QMainWindow):
         self.status.setText("Suche Roboter …")
         self.pending_open = False
         self.open_button.setEnabled(False)
+        self.token_label.clear()
+        self.token_label.hide()
         self.start_connector()
 
     def _open_browser(self):
@@ -211,6 +241,7 @@ class Window(QMainWindow):
     def state_changed(self, state, msg):
         self.connector_state = state
         self.status.setText(msg or state.value)
+        self.update_token_label()
 
         # The button is also the readiness indicator: it is usable only when
         # exactly one robot has been identified and therefore loadSystem is
