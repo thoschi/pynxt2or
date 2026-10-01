@@ -1,4 +1,4 @@
-# pynxt2or
+# pynxt2ors
 
 Modern 64-bit USB connector between LEGO Mindstorms NXT and Open Roberta Lab. It replaces the legacy Java 8/i386/leJOS/JNI connector with Python, PyUSB/libusb-1.0, HTTPS and PySide6.
 
@@ -24,11 +24,11 @@ After changing the rule: `udevadm control --reload-rules`, reconnect the NXT, an
 ## Useful commands
 
 ```bash
-pynxt2or --doctor       # works without NXT
-pynxt2or --simulate     # hardware/server-free state-machine test
-pynxt2or --probe        # tomorrow: real USB/LCP test
-pynxt2or --debug --probe
-pynxt2or                # GUI
+pynxt2ors --doctor       # works without NXT
+pynxt2ors --simulate     # hardware/server-free state-machine test
+pynxt2ors --probe        # tomorrow: real USB/LCP test
+pynxt2ors --debug --probe
+pynxt2ors                # GUI
 ```
 
 ## Implemented legacy behavior
@@ -44,35 +44,35 @@ mit dem angegebenen echten Open-Roberta-Server, registriert einen NXT, zeigt den
 Pairing-Token und führt das normale Push-/Download-Protokoll aus.
 
 ```bash
-pynxt2or --fake-nxt
+pynxt2ors --fake-nxt
 ```
 
 Für Protokollausgaben:
 
 ```bash
-pynxt2or --fake-nxt --debug
+pynxt2ors --fake-nxt --debug
 ```
 
 Der simulierte NXT meldet sich als `PYNXT2OR-SIM` mit Firmware `1.31`.
 Heruntergeladene Programme werden statt per USB auf einen Brick nach
-`~/pynxt2or-fake-downloads/` geschrieben und anschließend für zwei Sekunden als
+`~/pynxt2ors-fake-downloads/` geschrieben und anschließend für zwei Sekunden als
 "laufend" simuliert.
 
 Ein anderer Server kann wie gewohnt angegeben werden:
 
 ```bash
-pynxt2or --fake-nxt --server https://mein-open-roberta.example:443
+pynxt2ors --fake-nxt --server https://mein-open-roberta.example:443
 ```
 
 ## 0.4: NXT + EV3
 
-`pynxt2or` erkennt nun automatisch einen NXT über PyUSB oder einen Open-Roberta/leJOS-EV3 über das USB-Netzwerk unter `http://10.0.1.1`. Die Open-Roberta-Serverlogik und GUI werden gemeinsam verwendet. Der EV3-Pfad implementiert `/brickinfo`, `/program` und `/firmware` sowie das serverseitige `update`-Kommando. Er setzt die Open-Roberta/leJOS-Firmware auf dem EV3 voraus; die originale LEGO-Firmware stellt diese HTTP-Endpunkte nicht bereit.
+`pynxt2ors` erkennt nun automatisch einen NXT über PyUSB oder einen Open-Roberta/leJOS-EV3 über das USB-Netzwerk unter `http://10.0.1.1`. Die Open-Roberta-Serverlogik und GUI werden gemeinsam verwendet. Der EV3-Pfad implementiert `/brickinfo`, `/program` und `/firmware` sowie das serverseitige `update`-Kommando. Er setzt die Open-Roberta/leJOS-Firmware auf dem EV3 voraus; die originale LEGO-Firmware stellt diese HTTP-Endpunkte nicht bereit.
 
 Die GUI besitzt zusätzlich `Beenden`; während einer aktiven Verbindung bzw. Programmausführung ist der Knopf gesperrt. Der Token wird beim Warten auf Open Roberta in die Zwischenablage kopiert. Der Server-Timeout beträgt 70 Sekunden, damit das Long-Polling nicht nach 20 Sekunden abbricht.
 
 ## 0.5: eigener/öffentlicher Open-Roberta-Server
 
-Die GUI bietet zwei Servermodi. **Eigener Server** ist vorausgewählt; als Vorgabe wird `http://cora` verwendet und die Adresse kann in der GUI geändert werden (sie wird gespeichert). Beim Verbinden öffnet pynxt2or den angepassten eigenen Server automatisch mit `loadSystem` und `connectorToken`.
+Die GUI bietet zwei Servermodi. **Eigener Server** ist vorausgewählt; als Vorgabe wird `https://cora.corvi.schule` verwendet und die Adresse kann in der GUI geändert werden (sie wird gespeichert). Beim Verbinden öffnet pynxt2ors den angepassten eigenen Server automatisch mit `loadSystem` und `connectorToken`.
 
 **Online Open Roberta** verwendet `https://lab.open-roberta.org`. Der Knopf **Open Roberta öffnen** öffnet dort direkt das erkannte Robotersystem (`nxt` bzw. `ev3lejosv1`). Der Pairing-Token wird weiterhin angezeigt und in die Zwischenablage kopiert.
 

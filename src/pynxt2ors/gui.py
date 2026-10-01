@@ -27,7 +27,7 @@ from .server import OpenRobertaServer
 from .sim import SimNXT
 
 PUBLIC_OR = "https://lab.open-roberta.org"
-DEFAULT_LOCAL_OR = "http://cora"
+DEFAULT_LOCAL_OR = "https://cora.corvi.schule"
 
 
 class Bridge(QObject):
@@ -41,11 +41,11 @@ class Window(QMainWindow):
         self.connected = False
         self.connector_state = State.DISCOVER
         self.browser_opened_for_token = ""
-        self.settings = QSettings("pynxt2or", "pynxt2or")
+        self.settings = QSettings("pynxt2ors", "pynxt2ors")
 
         saved_local = self.settings.value("local_server", address or DEFAULT_LOCAL_OR, type=str)
 
-        self.setWindowTitle("pynxt2or – Open Roberta Connector")
+        self.setWindowTitle("pynxt2ors – Open Roberta Connector")
         self.setMinimumWidth(570)
         self.setFixedHeight(500 if fake_nxt else 445)
 
@@ -150,7 +150,7 @@ class Window(QMainWindow):
 
     def robot_system(self) -> str:
         kind = (self.connector.robot_kind or "NXT").upper()
-        # Current pynxt2or EV3 transport implements the Open-Roberta/leJOS v1 path.
+        # Current pynxt2ors EV3 transport implements the Open-Roberta/leJOS v1 path.
         return "ev3lejosv1" if kind == "EV3" else "nxt"
 
     def roberta_url(self, include_token=False) -> str:
@@ -167,7 +167,7 @@ class Window(QMainWindow):
             try:
                 self.connector.server.set_address(self.selected_server())
             except ValueError as exc:
-                QMessageBox.warning(self, "pynxt2or", str(exc))
+                QMessageBox.warning(self, "pynxt2ors", str(exc))
 
     @Slot()
     def server_selection_changed(self):
@@ -182,7 +182,7 @@ class Window(QMainWindow):
         try:
             webbrowser.open(self.roberta_url(include_token=False), new=2)
         except Exception as exc:
-            QMessageBox.warning(self, "pynxt2or", f"Open Roberta konnte nicht geöffnet werden:\n{exc}")
+            QMessageBox.warning(self, "pynxt2ors", f"Open Roberta konnte nicht geöffnet werden:\n{exc}")
 
     @Slot(object, str)
     def state_changed(self, state, msg):
@@ -222,8 +222,11 @@ class Window(QMainWindow):
         elif state == State.TOKEN_TIMEOUT:
             self.button.setEnabled(False)
         elif state == State.ERROR:
-            self.button.setEnabled(False)
-            QMessageBox.warning(self, "pynxt2or", msg)
+            self.connected = False
+            self.button.setText("Erneut versuchen")
+            self.button.setEnabled(True)
+            self.quit_button.setEnabled(True)
+            QMessageBox.warning(self, "pynxt2ors", msg)
 
     def toggle(self):
         if self.connected:
@@ -233,7 +236,7 @@ class Window(QMainWindow):
             self.save_local_address()
             self.connector.server.set_address(self.selected_server())
         except ValueError as exc:
-            QMessageBox.warning(self, "pynxt2or", str(exc))
+            QMessageBox.warning(self, "pynxt2ors", str(exc))
             return
         self.connector.request_connect()
 

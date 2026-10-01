@@ -1,5 +1,5 @@
 import unittest
-from pynxt2or.server import OpenRobertaServer
+from pynxt2ors.server import OpenRobertaServer
 class Resp:
     def __init__(self,j=None,content=b'',headers=None): self._j=j; self.content=content; self.headers=headers or {}; self.text='';
     def raise_for_status(self): pass

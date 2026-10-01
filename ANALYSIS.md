@@ -10,7 +10,7 @@ Registration sends device data + `token` + `cmd=register`; `repeat` means regist
 
 ## Device operations actually used
 
-The application only needs: discovery, `GET_DEVICE_INFO`, `GET_FIRMWARE_VERSION`, `GET_BATTERY_LEVEL`, `GET_CURRENT_PROGRAM_NAME`, delete, open-write, write, close, start-program and play-tone. File chunks are 58 bytes. This finite LCP subset is implemented directly in `pynxt2or/lcp.py`.
+The application only needs: discovery, `GET_DEVICE_INFO`, `GET_FIRMWARE_VERSION`, `GET_BATTERY_LEVEL`, `GET_CURRENT_PROGRAM_NAME`, delete, open-write, write, close, start-program and play-tone. File chunks are 58 bytes. This finite LCP subset is implemented directly in `pynxt2ors/lcp.py`.
 
 ## Server operations actually used
 

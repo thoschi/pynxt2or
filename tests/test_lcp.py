@@ -1,5 +1,5 @@
 import unittest
-from pynxt2or.lcp import NXTUSB, NXTProtocolError
+from pynxt2ors.lcp import NXTUSB, NXTProtocolError
 
 class FakeDev:
     def __init__(self,replies): self.replies=list(replies); self.writes=[]

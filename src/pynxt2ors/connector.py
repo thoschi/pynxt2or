@@ -73,7 +73,15 @@ class Connector:
                     while not self.stop_evt.is_set() and self.robot.get_current_program_name() is not None: time.sleep(1)
                     self.emit(State.CONNECTED,"Programm beendet")
             except Exception as exc:
-                if not self.stop_evt.is_set(): self.emit(State.ERROR,str(exc)); time.sleep(1)
+                if not self.stop_evt.is_set():
+                    self.emit(State.ERROR, str(exc))
+                    # Do not immediately rediscover/reconnect after a server
+                    # failure. That used to create an endless stream of error
+                    # dialogs. Wait for an explicit retry or for application exit.
+                    self.connect_evt.clear()
+                    while not self.stop_evt.is_set() and not self.connect_evt.wait(.2):
+                        pass
+                    self.connect_evt.clear()
             finally:
                 if self.robot:
                     try: self.robot.close()

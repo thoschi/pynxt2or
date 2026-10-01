@@ -1,4 +1,4 @@
-"""Simulation helpers for pynxt2or.
+"""Simulation helpers for pynxt2ors.
 
 SimNXT replaces only the physical NXT. It can therefore be combined with the
 real OpenRobertaServer to test registration, pairing, long polling and program
@@ -24,7 +24,7 @@ class SimNXT:
         self.running_until = 0.0
         self.running_name: str | None = None
         self.run_seconds = run_seconds
-        self.output_dir = Path(output_dir or (Path.home() / "pynxt2or-fake-downloads"))
+        self.output_dir = Path(output_dir or (Path.home() / "pynxt2ors-fake-downloads"))
 
     def open(self):
         self.closed = False
