@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pynxt2ors"
-version = "0.7.1"
+version = "0.7.2"
 description = "Modern 64-bit LEGO NXT/EV3/SPIKE connector for Open Roberta Lab"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -3,7 +3,7 @@ import logging, secrets, threading, time
 from enum import Enum
 from .discovery import AutoRobot
 from .robot import MultipleRobotsError, RobotError, RobotNotFound
-from .server import OpenRobertaServer
+from .server import OpenRobertaServer, ServerError
 
 log = logging.getLogger(__name__)
 TOKEN_ALPHABET = "123456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
@@ -64,16 +64,52 @@ class Connector:
                 self.connect_evt.clear(); self.token=make_token(); self.emit(State.WAIT_SERVER,f"Token: {self.token}")
                 reginfo = self.robot.register_info_for_server() if hasattr(self.robot,"register_info_for_server") else info
                 payload=dict(reginfo,token=self.token,cmd="register")
-                response=self.server.push(payload); cmd=response.get("cmd")
-                if cmd == "abort": self.emit(State.TOKEN_TIMEOUT,"Token-Zeitüberschreitung"); continue
+                try:
+                    response=self.server.push(payload)
+                except ServerError as exc:
+                    # A server/proxy failure must not invalidate the USB robot.
+                    # Keep the robot open and return to a usable READY state.
+                    self.token = ""
+                    self.emit(State.READY, f"{self.robot_kind} weiterhin erkannt: {self.brick} – Server nicht erreichbar: {exc}")
+                    if self.auto_connect:
+                        time.sleep(2)
+                        self.connect_evt.set()
+                    continue
+                cmd=response.get("cmd")
+                if cmd == "abort":
+                    self.token = ""
+                    self.emit(State.READY, f"{self.robot_kind} weiterhin erkannt: {self.brick} – Token abgelaufen")
+                    if self.auto_connect:
+                        time.sleep(1)
+                        self.connect_evt.set()
+                    continue
                 if cmd != "repeat": raise RuntimeError(f"Registrierung: unerwartetes Kommando {cmd!r}")
                 self.robot.melody("connect"); self.emit(State.CONNECTED,f"Verbunden: {self.brick}")
                 while not self.stop_evt.is_set():
                     if self.disconnect_evt.is_set(): self.disconnect_evt.clear(); self.robot.melody("disconnect"); break
                     info=self.robot.device_info_for_server(); payload=dict(info,token=self.token,cmd="push")
-                    response=self.server.push(payload); cmd=response.get("cmd")
+                    try:
+                        response=self.server.push(payload)
+                    except ServerError as exc:
+                        # /rest/pushcmd is long-polling. Reverse proxies may close
+                        # an idle upstream connection (e.g. with 502) although the
+                        # robot itself is still perfectly connected. Treat that as
+                        # a transient transport failure and retry with the same token.
+                        self.emit(State.CONNECTED, f"{self.brick} verbunden – Serververbindung wird erneuert …")
+                        log.warning("temporärer Open-Roberta-Fehler, wiederhole push: %s", exc)
+                        self.server.abort()
+                        if self.stop_evt.wait(2):
+                            break
+                        continue
+                    cmd=response.get("cmd")
                     if cmd == "repeat": continue
-                    if cmd == "abort": self.robot.melody("disconnect"); break
+                    if cmd == "abort":
+                        self.robot.melody("disconnect")
+                        self.token = ""
+                        self.emit(State.READY, f"{self.robot_kind} weiterhin erkannt: {self.brick} – Open-Roberta-Verbindung beendet")
+                        if self.auto_connect:
+                            self.connect_evt.set()
+                        break
                     if cmd == "update": self._update_ev3(info); break
                     if cmd != "download": raise RuntimeError(f"Unerwartetes Serverkommando {cmd!r}")
                     binary,filename=self.server.download(payload); program=self.robot.upload_and_start(binary,filename)
