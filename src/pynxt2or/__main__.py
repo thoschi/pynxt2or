@@ -19,7 +19,7 @@ def main():
         action="store_true",
         help="GUI mit simuliertem NXT, aber echtem Open-Roberta-Server starten",
     )
-    p.add_argument("--server", default="https://lab.open-roberta.org:443")
+    p.add_argument("--server", default="http://cora", help="Vorgabe für den eigenen Open-Roberta-Server")
     p.add_argument("--debug", action="store_true")
     a = p.parse_args()
 
