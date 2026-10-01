@@ -5,3 +5,6 @@ class RobotError(Exception):
 
 class RobotNotFound(RobotError):
     pass
+
+class MultipleRobotsError(RobotError):
+    pass

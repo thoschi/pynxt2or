@@ -40,7 +40,7 @@ class OpenRobertaServer:
             r = self.session.post(
                 self.base + path,
                 json=payload,
-                headers={"User-Agent": "pynxt2ors/0.5.1"},
+                headers={"User-Agent": "pynxt2ors/0.7.1"},
                 timeout=(self.connect_timeout, self.read_timeout),
             )
             r.raise_for_status()
@@ -71,7 +71,7 @@ class OpenRobertaServer:
         try:
             r = self.session.get(
                 self.base + "/rest/update/" + name,
-                headers={"User-Agent": "pynxt2ors/0.5.1"},
+                headers={"User-Agent": "pynxt2ors/0.7.1"},
                 timeout=(self.connect_timeout, self.DOWNLOAD_TIMEOUT),
             )
             r.raise_for_status()

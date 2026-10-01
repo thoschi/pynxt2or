@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging, secrets, threading, time
 from enum import Enum
 from .discovery import AutoRobot
-from .robot import RobotError, RobotNotFound
+from .robot import MultipleRobotsError, RobotError, RobotNotFound
 from .server import OpenRobertaServer
 
 log = logging.getLogger(__name__)
@@ -10,15 +10,16 @@ TOKEN_ALPHABET = "123456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
 def make_token(): return "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(8))
 
 class State(Enum):
-    DISCOVER="discover"; READY="ready"; WAIT_SERVER="wait_server"; CONNECTED="connected"; RUNNING="running"; ERROR="error"; TOKEN_TIMEOUT="token_timeout"
+    DISCOVER="discover"; READY="ready"; WAIT_SERVER="wait_server"; CONNECTED="connected"; RUNNING="running"; MULTIPLE="multiple"; ERROR="error"; TOKEN_TIMEOUT="token_timeout"
 
 class Connector:
-    def __init__(self, on_state=lambda *_:None, address="https://lab.open-roberta.org:443", robot_factory=AutoRobot, server=None, nxt_factory=None):
+    def __init__(self, on_state=lambda *_:None, address="https://lab.open-roberta.org:443", robot_factory=AutoRobot, server=None, nxt_factory=None, auto_connect=False):
         self.on_state=on_state; self.server=server or OpenRobertaServer(address)
         # nxt_factory remains accepted for compatibility with 0.3/tests.
         self.robot_factory=nxt_factory or robot_factory
+        self.auto_connect=auto_connect
         self.stop_evt=threading.Event(); self.connect_evt=threading.Event(); self.disconnect_evt=threading.Event()
-        self.robot=None; self.nxt=None; self.token=""; self.brick=""; self.robot_kind=""; self.state=State.DISCOVER
+        self.robot=None; self.nxt=None; self.token=""; self.brick=""; self.robot_kind=""; self.robot_system=""; self.state=State.DISCOVER
 
     def emit(self,state,message=""):
         self.state=state; log.info("%s %s",state.value,message); self.on_state(state,message)
@@ -30,6 +31,7 @@ class Connector:
         r=self.robot_factory().open(); self.robot=r; self.nxt=r
         info=r.device_info_for_server(); self.brick=info.get("brickname", info.get("name", "Roboter"))
         self.robot_kind=getattr(r,"robot_kind", info.get("robot", "robot")).upper()
+        self.robot_system=getattr(r,"openroberta_system", "") or {"NXT":"nxt","EV3":"ev3lejosv1","SPIKE":"spike"}.get(self.robot_kind, info.get("robot", ""))
         return r,info
 
     def _update_ev3(self, info):
@@ -44,12 +46,18 @@ class Connector:
     def run(self):
         while not self.stop_evt.is_set():
             try:
-                self.emit(State.DISCOVER,"Suche NXT oder EV3 …")
+                self.emit(State.DISCOVER,"Suche unterstützten LEGO-Roboter …")
                 try: self.robot,info=self._discover()
                 except RobotNotFound: time.sleep(1); continue
+                except MultipleRobotsError as exc:
+                    self.emit(State.MULTIPLE, str(exc))
+                    time.sleep(1)
+                    continue
                 if self.robot.get_current_program_name() is not None:
                     raise RobotError("Auf dem Roboter läuft bereits ein Programm")
-                self.emit(State.READY,f"{self.robot_kind} gefunden: {self.brick}")
+                self.emit(State.READY,f"{self.robot_kind} erkannt: {self.brick} – Open-Roberta-System: {self.robot_system}")
+                if self.auto_connect:
+                    self.connect_evt.set()
                 while not self.stop_evt.is_set() and not self.connect_evt.wait(.2):
                     if self.robot.get_current_program_name() is not None: raise RobotError("Auf dem Roboter läuft bereits ein Programm")
                 if self.stop_evt.is_set(): break
@@ -86,5 +94,5 @@ class Connector:
                 if self.robot:
                     try: self.robot.close()
                     except Exception: pass
-                self.robot=None; self.nxt=None; self.token=""; self.brick=""; self.robot_kind=""; self.connect_evt.clear(); self.disconnect_evt.clear()
+                self.robot=None; self.nxt=None; self.token=""; self.brick=""; self.robot_kind=""; self.robot_system=""; self.connect_evt.clear(); self.disconnect_evt.clear()
         self.server.close()

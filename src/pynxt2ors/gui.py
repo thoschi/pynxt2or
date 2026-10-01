@@ -1,3 +1,4 @@
+```python
 from __future__ import annotations
 
 import sys
@@ -5,29 +6,28 @@ import threading
 import webbrowser
 from urllib.parse import urlencode
 
-from PySide6.QtCore import QObject, QSettings, Signal, Slot, Qt
+from PySide6.QtCore import QObject, QSettings, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QApplication,
-    QButtonGroup,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QMessageBox,
-    QPushButton,
-    QRadioButton,
-    QVBoxLayout,
-    QWidget,
+    QApplication, QButtonGroup, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMessageBox, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from .connector import Connector, State
 from .discovery import AutoRobot
 from .server import OpenRobertaServer
-from .sim import SimNXT
 
 PUBLIC_OR = "https://lab.open-roberta.org"
 DEFAULT_LOCAL_OR = "https://cora.corvi.schule"
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class Bridge(QObject):
@@ -35,224 +35,514 @@ class Bridge(QObject):
 
 
 class Window(QMainWindow):
-    def __init__(self, address=DEFAULT_LOCAL_OR, fake_nxt=False):
+    def __init__(
+        self,
+        address=DEFAULT_LOCAL_OR,
+        robot_factory=AutoRobot,
+        system_override="",
+        connector_enabled=True,
+    ):
         super().__init__()
-        self.fake_nxt = fake_nxt
-        self.connected = False
-        self.connector_state = State.DISCOVER
-        self.browser_opened_for_token = ""
-        self.settings = QSettings("pynxt2ors", "pynxt2ors")
 
-        saved_local = self.settings.value("local_server", address or DEFAULT_LOCAL_OR, type=str)
+        self.settings = QSettings("pynxt2ors", "pynxt2ors")
+        self.local_server = self.settings.value(
+            "local_server",
+            address or DEFAULT_LOCAL_OR,
+            type=str,
+        )
+
+        self.robot_factory = robot_factory
+        self.system_override = system_override
+        self.connector_enabled = connector_enabled
+
+        self.connector = None
+        self.thread = None
+        self.connector_state = State.DISCOVER
+        self.pending_open = False
+        self.last_error = ""
 
         self.setWindowTitle("pynxt2ors – Open Roberta Connector")
-        self.setMinimumWidth(570)
-        self.setFixedHeight(500 if fake_nxt else 445)
+        self.setFixedSize(590, 370)
 
         self.bridge = Bridge()
         self.bridge.changed.connect(self.state_changed)
 
-        factory = SimNXT if fake_nxt else AutoRobot
-        self.connector = Connector(
-            lambda s, m: self.bridge.changed.emit(s, m),
-            address=saved_local,
-            robot_factory=factory,
-            server=OpenRobertaServer(saved_local),
-        )
-
         box = QVBoxLayout()
         box.setContentsMargins(28, 24, 28, 24)
-        box.setSpacing(12)
+        box.setSpacing(13)
+
+        # ------------------------------------------------------------------
+        # Titel
+        # ------------------------------------------------------------------
 
         title = QLabel("Open Roberta Connector")
+
         f = QFont()
         f.setPointSize(20)
         f.setBold(True)
+
         title.setFont(f)
         title.setAlignment(Qt.AlignCenter)
+
         box.addWidget(title)
 
-        if fake_nxt:
-            mode = QLabel("SIMULATION – echter Open-Roberta-Server, kein echter NXT")
-            mf = QFont()
-            mf.setBold(True)
-            mode.setFont(mf)
-            mode.setAlignment(Qt.AlignCenter)
-            mode.setWordWrap(True)
-            box.addWidget(mode)
+        # ------------------------------------------------------------------
+        # Status
+        # ------------------------------------------------------------------
 
-        self.status = QLabel("Starte …")
+        self.status = QLabel(
+            "Suche Roboter …" if connector_enabled else "Bereit"
+        )
         self.status.setAlignment(Qt.AlignCenter)
         self.status.setWordWrap(True)
+
         box.addWidget(self.status)
 
-        self.token = QLabel("")
-        tf = QFont("Monospace")
-        tf.setPointSize(20)
-        tf.setBold(True)
-        self.token.setFont(tf)
-        self.token.setAlignment(Qt.AlignCenter)
-        box.addWidget(self.token)
+        # ------------------------------------------------------------------
+        # Token
+        # ------------------------------------------------------------------
 
-        server_label = QLabel("Open-Roberta-Server")
+        self.token_label = ClickableLabel("")
+        self.token_label.setAlignment(Qt.AlignCenter)
+        self.token_label.setCursor(Qt.PointingHandCursor)
+        self.token_label.setToolTip(
+            "Token anklicken, um ihn in die Zwischenablage zu kopieren"
+        )
+
+        token_font = QFont("Monospace")
+        token_font.setPointSize(13)
+        token_font.setBold(True)
+
+        self.token_label.setFont(token_font)
+        self.token_label.clicked.connect(self.copy_token)
+        self.token_label.hide()
+
+        box.addWidget(self.token_label)
+
+        # ------------------------------------------------------------------
+        # Server
+        # ------------------------------------------------------------------
+
+        sl = QLabel("Open-Roberta-Server")
+
         sf = QFont()
         sf.setBold(True)
-        server_label.setFont(sf)
-        box.addWidget(server_label)
 
-        server_row = QHBoxLayout()
+        sl.setFont(sf)
+        box.addWidget(sl)
+
+        row = QHBoxLayout()
+
         self.local_radio = QRadioButton("Eigener Server")
-        self.online_radio = QRadioButton("Online Open Roberta")
-        self.server_group = QButtonGroup(self)
-        self.server_group.addButton(self.local_radio)
-        self.server_group.addButton(self.online_radio)
-        self.local_radio.setChecked(True)
-        server_row.addWidget(self.local_radio)
-        server_row.addWidget(self.online_radio)
-        server_row.addStretch(1)
-        box.addLayout(server_row)
+        self.online_radio = QRadioButton("Offizielles Open Roberta")
 
-        self.local_address = QLineEdit(saved_local)
-        self.local_address.setPlaceholderText(DEFAULT_LOCAL_OR)
-        self.local_address.editingFinished.connect(self.save_local_address)
-        box.addWidget(self.local_address)
+        group = QButtonGroup(self)
+        group.addButton(self.local_radio)
+        group.addButton(self.online_radio)
+
+        self.local_radio.setChecked(True)
+
+        row.addWidget(self.local_radio)
+        row.addWidget(self.online_radio)
+        row.addStretch(1)
+
+        box.addLayout(row)
+
+        self.address = QLineEdit(self.local_server)
+        self.address.editingFinished.connect(self.save_local_address)
+
+        box.addWidget(self.address)
 
         self.local_radio.toggled.connect(self.server_selection_changed)
         self.online_radio.toggled.connect(self.server_selection_changed)
 
-        self.open_button = QPushButton("Open Roberta öffnen")
-        self.open_button.clicked.connect(self.open_roberta_manual)
-        self.open_button.setEnabled(False)
+        # ------------------------------------------------------------------
+        # Open-Roberta-Button
+        # ------------------------------------------------------------------
+
+        self.open_button = QPushButton("Open Roberta Lab öffnen")
+        self.open_button.setMinimumHeight(42)
+        self.open_button.clicked.connect(self.open_roberta)
+        self.open_button.setEnabled(not self.connector_enabled)
+
         box.addWidget(self.open_button)
 
-        self.button = QPushButton("Verbinden")
-        self.button.setEnabled(False)
-        self.button.clicked.connect(self.toggle)
-        box.addWidget(self.button)
-
-        self.quit_button = QPushButton("Beenden")
-        self.quit_button.clicked.connect(self.quit_application)
-        box.addWidget(self.quit_button)
+        # ------------------------------------------------------------------
+        # Fenster
+        # ------------------------------------------------------------------
 
         root = QWidget()
         root.setLayout(box)
-        self.setCentralWidget(root)
-        self.server_selection_changed()
-        threading.Thread(target=self.connector.run, daemon=True).start()
 
-    def selected_server(self) -> str:
+        self.setCentralWidget(root)
+
+        self.server_selection_changed()
+
+        if self.connector_enabled:
+            self.start_connector()
+        else:
+            self.status.setText(f"Modus: {self.system_override}")
+
+    # ----------------------------------------------------------------------
+    # Serverauswahl
+    # ----------------------------------------------------------------------
+
+    def selected_server(self):
         if self.online_radio.isChecked():
             return PUBLIC_OR
-        value = self.local_address.text().strip() or DEFAULT_LOCAL_OR
+
+        value = self.address.text().strip() or DEFAULT_LOCAL_OR
+
         if "://" not in value:
             value = "https://" + value
+
         return value.rstrip("/")
 
-    def robot_system(self) -> str:
-        kind = (self.connector.robot_kind or "NXT").upper()
-        # Current pynxt2ors EV3 transport implements the Open-Roberta/leJOS v1 path.
-        return "ev3lejosv1" if kind == "EV3" else "nxt"
-
-    def roberta_url(self, include_token=False) -> str:
-        params = {"loadSystem": self.robot_system()}
-        if include_token and self.connector.token and self.local_radio.isChecked():
-            params["connectorToken"] = self.connector.token
-        return self.selected_server() + "/?" + urlencode(params)
-
     def save_local_address(self):
-        value = self.local_address.text().strip() or DEFAULT_LOCAL_OR
-        self.local_address.setText(value)
+        if not self.local_radio.isChecked():
+            return
+
+        value = self.address.text().strip() or DEFAULT_LOCAL_OR
+
+        self.local_server = value
+        self.address.setText(value)
+
         self.settings.setValue("local_server", value)
-        if self.local_radio.isChecked() and self.connector_state in (State.DISCOVER, State.READY):
-            try:
-                self.connector.server.set_address(self.selected_server())
-            except ValueError as exc:
-                QMessageBox.warning(self, "pynxt2ors", str(exc))
 
     @Slot()
     def server_selection_changed(self):
-        self.local_address.setEnabled(self.local_radio.isChecked() and not self.connected)
-        if self.connector_state in (State.DISCOVER, State.READY):
-            try:
-                self.connector.server.set_address(self.selected_server())
-            except ValueError:
-                pass
+        if self.online_radio.isChecked():
 
-    def open_roberta_manual(self):
+            if self.address.isEnabled():
+                self.save_local_address()
+
+            self.address.setText(PUBLIC_OR)
+            self.address.setEnabled(False)
+
+        else:
+
+            self.address.setText(self.local_server)
+            self.address.setEnabled(True)
+
+        # Eine bereits laufende Long-Poll-Verbindung gehört zum bisherigen
+        # Server. Beim Wechsel wird der Connector deshalb sauber neu gestartet.
+        if self.connector_enabled and self.connector is not None:
+            self.restart_connector()
+
+    # ----------------------------------------------------------------------
+    # Robotersystem
+    # ----------------------------------------------------------------------
+
+    def robot_system(self):
+        if self.system_override:
+            return self.system_override
+
+        if self.connector and self.connector.robot_system:
+            return self.connector.robot_system
+
+        return ""
+
+    # ----------------------------------------------------------------------
+    # URL
+    # ----------------------------------------------------------------------
+
+    def roberta_url(self, include_token=False):
+        system = self.robot_system()
+
+        if not system:
+            raise RuntimeError("Noch kein Roboter erkannt")
+
+        params = {
+            "loadSystem": system,
+        }
+
+        if (
+            include_token
+            and self.local_radio.isChecked()
+            and self.connector
+            and self.connector.token
+        ):
+            params["connectorToken"] = self.connector.token
+
+        return self.selected_server() + "/?" + urlencode(params)
+
+    # ----------------------------------------------------------------------
+    # Connector
+    # ----------------------------------------------------------------------
+
+    def start_connector(self):
+        self.connector = Connector(
+            lambda s, m: self.bridge.changed.emit(s, m),
+            address=self.selected_server(),
+            robot_factory=self.robot_factory,
+            server=OpenRobertaServer(self.selected_server()),
+            auto_connect=True,
+        )
+
+        self.thread = threading.Thread(
+            target=self.connector.run,
+            daemon=True,
+        )
+
+        self.thread.start()
+
+    def stop_connector(self):
+        if self.connector:
+            self.connector.stop()
+
+        self.connector = None
+        self.thread = None
+
+    def restart_connector(self):
+        self.stop_connector()
+
+        self.connector_state = State.DISCOVER
+        self.status.setText("Suche Roboter …")
+
+        self.pending_open = False
+
+        self.token_label.clear()
+        self.token_label.hide()
+
+        self.open_button.setEnabled(False)
+
+        self.start_connector()
+
+    # ----------------------------------------------------------------------
+    # Token
+    # ----------------------------------------------------------------------
+
+    @Slot()
+    def copy_token(self):
+        if not self.connector or not self.connector.token:
+            return
+
+        token = self.connector.token
+
+        QApplication.clipboard().setText(token)
+
+        self.token_label.setText("Token kopiert ✓")
+
+        QTimer.singleShot(
+            1500,
+            self.restore_token_label,
+        )
+
+    def restore_token_label(self):
+        if self.connector and self.connector.token:
+            self.token_label.setText(
+                f"Token: {self.connector.token}"
+            )
+            self.token_label.show()
+        else:
+            self.token_label.clear()
+            self.token_label.hide()
+
+    # ----------------------------------------------------------------------
+    # Browser
+    # ----------------------------------------------------------------------
+
+    def _open_browser(self):
+        include_token = (
+            self.local_radio.isChecked()
+            and self.connector_enabled
+        )
+
+        webbrowser.open(
+            self.roberta_url(include_token),
+            new=2,
+        )
+
+        self.pending_open = False
+
+    @Slot()
+    def open_roberta(self):
+        self.save_local_address()
+
         try:
-            webbrowser.open(self.roberta_url(include_token=False), new=2)
+            if not self.connector_enabled:
+                self._open_browser()
+                return
+
+            if not self.robot_system():
+                QMessageBox.information(
+                    self,
+                    "pynxt2ors",
+                    "Noch kein Roboter erkannt.",
+                )
+                return
+
+            # Das private gepatchte Lab benötigt den aktuellen Connector-Token.
+            # Falls noch kein Token existiert, wird eine neue Registrierung
+            # gestartet. Sobald WAIT_SERVER den Token liefert, wird der Browser
+            # automatisch geöffnet.
+            if (
+                self.local_radio.isChecked()
+                and not self.connector.token
+            ):
+                self.pending_open = True
+
+                self.connector.server.set_address(
+                    self.selected_server()
+                )
+
+                self.connector.request_connect()
+
+                self.status.setText(
+                    "Stelle Verbindung zu Open Roberta her …"
+                )
+
+                return
+
+            self._open_browser()
+
         except Exception as exc:
-            QMessageBox.warning(self, "pynxt2ors", f"Open Roberta konnte nicht geöffnet werden:\n{exc}")
+            QMessageBox.warning(
+                self,
+                "pynxt2ors",
+                "Open Roberta konnte nicht geöffnet werden:\n"
+                f"{exc}",
+            )
+
+    # ----------------------------------------------------------------------
+    # Statusänderungen
+    # ----------------------------------------------------------------------
 
     @Slot(object, str)
     def state_changed(self, state, msg):
         self.connector_state = state
         self.status.setText(msg or state.value)
-        self.quit_button.setEnabled(state not in (State.CONNECTED, State.RUNNING, State.WAIT_SERVER))
-        self.open_button.setEnabled(bool(self.connector.robot_kind))
 
-        locked = state in (State.WAIT_SERVER, State.CONNECTED, State.RUNNING)
-        self.local_radio.setEnabled(not locked)
-        self.online_radio.setEnabled(not locked)
-        self.local_address.setEnabled(not locked and self.local_radio.isChecked())
+        # Der Button dient gleichzeitig als Bereitschaftsanzeige.
+        # Er wird nur aktiviert, wenn genau ein Robotersystem bekannt ist.
+        ready_states = (
+            State.READY,
+            State.WAIT_SERVER,
+            State.CONNECTED,
+            State.RUNNING,
+        )
 
-        if state == State.READY:
-            self.token.clear()
-            self.connected = False
-            self.browser_opened_for_token = ""
-            self.button.setText("Verbinden")
-            self.button.setEnabled(True)
-        elif state == State.WAIT_SERVER:
-            self.token.setText(self.connector.token)
-            QApplication.clipboard().setText(self.connector.token)
-            self.button.setEnabled(False)
-            # The patched self-hosted Lab consumes connectorToken itself.
-            if self.local_radio.isChecked() and self.browser_opened_for_token != self.connector.token:
-                self.browser_opened_for_token = self.connector.token
-                webbrowser.open(self.roberta_url(include_token=True), new=2)
-        elif state in (State.CONNECTED, State.RUNNING):
-            self.connected = True
-            self.button.setText("Trennen")
-            self.button.setEnabled(True)
-        elif state == State.DISCOVER:
-            self.token.clear()
-            self.connected = False
-            self.button.setText("Verbinden")
-            self.button.setEnabled(False)
-        elif state == State.TOKEN_TIMEOUT:
-            self.button.setEnabled(False)
+        self.open_button.setEnabled(
+            bool(self.robot_system())
+            and state in ready_states
+        )
+
+        # ------------------------------------------------------------------
+        # Token vorhanden
+        # ------------------------------------------------------------------
+
+        if state == State.WAIT_SERVER:
+
+            if self.connector and self.connector.token:
+                self.token_label.setText(
+                    f"Token: {self.connector.token}"
+                )
+                self.token_label.show()
+
+            if self.pending_open:
+                try:
+                    self._open_browser()
+
+                except Exception as exc:
+                    self.pending_open = False
+
+                    QMessageBox.warning(
+                        self,
+                        "pynxt2ors",
+                        str(exc),
+                    )
+
+        # ------------------------------------------------------------------
+        # Fehler
+        # ------------------------------------------------------------------
+
         elif state == State.ERROR:
-            self.connected = False
-            self.button.setText("Erneut versuchen")
-            self.button.setEnabled(True)
-            self.quit_button.setEnabled(True)
-            QMessageBox.warning(self, "pynxt2ors", msg)
 
-    def toggle(self):
-        if self.connected:
-            self.connector.request_disconnect()
-            return
-        try:
-            self.save_local_address()
-            self.connector.server.set_address(self.selected_server())
-        except ValueError as exc:
-            QMessageBox.warning(self, "pynxt2ors", str(exc))
-            return
-        self.connector.request_connect()
+            self.open_button.setEnabled(False)
 
-    def quit_application(self):
-        if self.connector_state in (State.WAIT_SERVER, State.CONNECTED, State.RUNNING):
-            return
-        self.connector.stop()
-        QApplication.quit()
+            self.token_label.clear()
+            self.token_label.hide()
+
+            # Jeden identischen Fehler nur einmal anzeigen.
+            if msg != self.last_error:
+                self.last_error = msg
+
+                QMessageBox.warning(
+                    self,
+                    "pynxt2ors",
+                    msg,
+                )
+
+        # ------------------------------------------------------------------
+        # Mehrere Roboter
+        # ------------------------------------------------------------------
+
+        elif state == State.MULTIPLE:
+
+            self.open_button.setEnabled(False)
+
+            self.token_label.clear()
+            self.token_label.hide()
+
+        # ------------------------------------------------------------------
+        # Suche / Timeout
+        # ------------------------------------------------------------------
+
+        elif state in (
+            State.DISCOVER,
+            State.TOKEN_TIMEOUT,
+        ):
+
+            self.open_button.setEnabled(False)
+
+            self.token_label.clear()
+            self.token_label.hide()
+
+        # ------------------------------------------------------------------
+        # Bereit / verbunden
+        # ------------------------------------------------------------------
+
+        elif state in (
+            State.READY,
+            State.CONNECTED,
+            State.RUNNING,
+        ):
+
+            self.last_error = ""
+
+            # Ein vorhandener Token bleibt auch nach erfolgreicher
+            # Registrierung sichtbar und kann weiterhin kopiert werden.
+            if self.connector and self.connector.token:
+                self.token_label.setText(
+                    f"Token: {self.connector.token}"
+                )
+                self.token_label.show()
+
+    # ----------------------------------------------------------------------
+    # Beenden
+    # ----------------------------------------------------------------------
 
     def closeEvent(self, event):
-        self.connector.stop()
+        self.stop_connector()
         event.accept()
 
 
-def main(address=DEFAULT_LOCAL_OR, fake_nxt=False):
+def main(
+    address=DEFAULT_LOCAL_OR,
+    robot_factory=AutoRobot,
+    system_override="",
+    connector_enabled=True,
+):
     app = QApplication.instance() or QApplication(sys.argv)
-    w = Window(address, fake_nxt=fake_nxt)
+
+    w = Window(
+        address,
+        robot_factory=robot_factory,
+        system_override=system_override,
+        connector_enabled=connector_enabled,
+    )
+
     w.show()
+
     return app.exec()
+```

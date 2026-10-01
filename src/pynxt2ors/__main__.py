@@ -13,12 +13,13 @@ def main():
     p = argparse.ArgumentParser(prog="pynxt2ors")
     p.add_argument("--probe", action="store_true", help="NXT finden und Geräteinformationen per LCP lesen")
     p.add_argument("--doctor", action="store_true", help="Python-, GUI- und USB-Abhängigkeiten prüfen")
-    p.add_argument("--simulate", action="store_true", help="Connector ohne NXT/Server einmal vollständig durchlaufen")
-    p.add_argument(
-        "--fake-nxt",
-        action="store_true",
-        help="GUI mit simuliertem NXT, aber echtem Open-Roberta-Server starten",
-    )
+    p.add_argument("--simulate", action="store_true", help="Vollständig offline simulieren")
+    fake = p.add_mutually_exclusive_group()
+    fake.add_argument("--fake-nxt", action="store_true", help="NXT simulieren, echten Open-Roberta-Server verwenden")
+    fake.add_argument("--fake-ev3", action="store_true", help="EV3 simulieren, echten Open-Roberta-Server verwenden")
+    fake.add_argument("--fake-spike", action="store_true", help="SPIKE simulieren, echten Open-Roberta-Server verwenden")
+    p.add_argument("--firmware", choices=("lejos", "ev3dev", "lego", "pybricks"), help="Firmware für --fake-ev3/--fake-spike")
+    p.add_argument("--system", choices=("ev3dev", "spikePybricks"), help="Sondermodus ohne lokalen Connector")
     p.add_argument("--server", default="https://cora.corvi.schule", help="Vorgabe für den eigenen Open-Roberta-Server")
     p.add_argument("--debug", action="store_true")
     a = p.parse_args()
@@ -43,30 +44,38 @@ def main():
     if a.simulate:
         from .connector import Connector, State
         from .sim import SimNXT, SimServer
-
         done = threading.Event()
-
         def cb(s, m):
             print(f"{s.value:12} {m}")
-            if s == State.READY:
-                c.request_connect()
+            if s == State.READY: c.request_connect()
             if s == State.CONNECTED and m == "Programm beendet":
-                done.set()
-                c.stop()
-
+                done.set(); c.stop()
         c = Connector(cb, nxt_factory=SimNXT, server=SimServer())
-        t = threading.Thread(target=c.run)
-        t.start()
-        done.wait(8)
-        c.stop()
-        t.join(2)
-        if not done.is_set():
-            raise SystemExit("Simulation nicht vollständig durchlaufen")
+        t = threading.Thread(target=c.run); t.start(); done.wait(8); c.stop(); t.join(2)
+        if not done.is_set(): raise SystemExit("Simulation nicht vollständig durchlaufen")
         print("Simulation erfolgreich.")
         return 0
 
+    from .discovery import AutoRobot
     from .gui import main as gui_main
-    return gui_main(a.server, fake_nxt=a.fake_nxt)
+    from .sim import SimEV3, SimNXT, SimSpike
+
+    if a.system:
+        return gui_main(a.server, system_override=a.system, connector_enabled=False)
+    if a.fake_nxt:
+        return gui_main(a.server, robot_factory=SimNXT)
+    if a.fake_ev3:
+        firmware = a.firmware or "lejos"
+        if firmware not in ("lejos", "ev3dev"):
+            p.error("--fake-ev3 erlaubt --firmware lejos|ev3dev")
+        return gui_main(a.server, robot_factory=lambda: SimEV3(firmware))
+    if a.fake_spike:
+        firmware = a.firmware or "lego"
+        if firmware not in ("lego", "pybricks"):
+            p.error("--fake-spike erlaubt --firmware lego|pybricks")
+        return gui_main(a.server, robot_factory=lambda: SimSpike(firmware))
+
+    return gui_main(a.server, robot_factory=AutoRobot)
 
 
 if __name__ == "__main__":
